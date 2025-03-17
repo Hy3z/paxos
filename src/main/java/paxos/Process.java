@@ -1,4 +1,4 @@
-package Paxos;
+package paxos;
 
 import akka.actor.AbstractActor;
 import akka.actor.ActorRef;
@@ -12,7 +12,7 @@ public class Process extends AbstractActor {
         return Props.create(Process.class);
     }
 
-    private final LoggingAdapter log = Logging.getLogger(
+    private final LoggingAdapter logger = Logging.getLogger(
         getContext().getSystem(),
         this
     );
