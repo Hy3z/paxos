@@ -8,19 +8,38 @@ import akka.event.Logging;
 import akka.event.LoggingAdapter;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Date;
 import java.util.List;
 
 public class Paxos extends AbstractActor {
 
-    final List<ActorRef> actors = new ArrayList<>();
-    final List<ActorRef> alive_actors = new ArrayList<>();
-    final LoggingAdapter logger = Logging.getLogger(
-        getContext().getSystem(),
-        this
-    );
-    long start_time = 0;
-    long end_time = Long.MAX_VALUE;
+    public record RunMessage(
+        int N,
+        int f,
+        float alpha,
+        int hold_ms,
+        int timeout_ms
+    ) {}
+
+    //system_time is the time at which the system decided, get it by calling System.currentTimeMillis()
+    public record DecidedMessage(long system_time) {}
+
+    //tell the report actor (here,the system actor) to report the time taken
+    public record ReportMessage() {}
+
+    //give the list of actors & the actor to report to (here, the system actor)
+    public record ActorListMessage(
+        ActorRef report_actor,
+        List<ActorRef> actors
+    ) {}
+
+    //crash the actor with probability alpha
+    public record CrashMessage(float alpha) {}
+
+    //launch the actor
+    public record LaunchMessage() {}
+
+    //hold the actor
+    public record HoldMessage() {}
 
     public static void main(final String[] args) throws InterruptedException {
         final ActorSystem system = ActorSystem.create("system");
@@ -37,6 +56,19 @@ public class Paxos extends AbstractActor {
         system.terminate();
     }
 
+    final List<ActorRef> actors = new ArrayList<>();
+
+    final List<ActorRef> alive_actors = new ArrayList<>();
+
+    final LoggingAdapter logger = Logging.getLogger(
+        getContext().getSystem(),
+        this
+    );
+
+    long start_time = 0;
+
+    long end_time = Long.MAX_VALUE;
+
     @Override
     public Receive createReceive() {
         return receiveBuilder()
@@ -50,7 +82,7 @@ public class Paxos extends AbstractActor {
             .build();
     }
 
-    private void run(RunMessage run_message) throws InterruptedException {
+    private void run(final RunMessage run_message) throws InterruptedException {
         //Create N actors
         logger.info("Creating N actors...");
         for (int i = 0; i < run_message.N(); i++) {
@@ -71,18 +103,8 @@ public class Paxos extends AbstractActor {
             );
             actor_neighbours.remove(actor); //remove self from the list
             actor.tell(
-                new ActorListMessage(actor_neighbours),
-                ActorRef.noSender()
-            );
-        }
-        logger.info("Sent.");
-
-        //Send the system actor to all actors
-        logger.info("Sending system actor...");
-        for (final ActorRef actor : actors) {
-            actor.tell(
-                new SystemActorMessage(getContext().getSelf()),
-                ActorRef.noSender()
+                new ActorListMessage(getSelf(), actor_neighbours),
+                getSelf()
             );
         }
         logger.info("Sent.");
@@ -92,10 +114,7 @@ public class Paxos extends AbstractActor {
         Collections.shuffle(actors);
         for (int i = 0; i < run_message.f(); i++) {
             final ActorRef actor = actors.get(i);
-            actor.tell(
-                new CrashMessage(run_message.alpha()),
-                ActorRef.noSender()
-            );
+            actor.tell(new CrashMessage(run_message.alpha()), getSelf());
             alive_actors.remove(actor);
         }
         logger.info("Crashed.");
@@ -107,7 +126,7 @@ public class Paxos extends AbstractActor {
         logger.info("Launching actors...");
         start_time = System.currentTimeMillis();
         for (final ActorRef actor : actors) {
-            actor.tell(new LaunchMessage(), ActorRef.noSender());
+            actor.tell(new LaunchMessage(), getSelf());
         }
         logger.info("Launched.");
 
@@ -119,20 +138,8 @@ public class Paxos extends AbstractActor {
         Collections.shuffle(alive_actors);
         for (int i = 1; i < alive_actors.size(); i++) {
             final ActorRef alive_actor = alive_actors.get(i);
-            alive_actor.tell(new HoldMessage(), ActorRef.noSender());
+            alive_actor.tell(new HoldMessage(), getSelf());
         }
         logger.info("Sent.");
     }
-
-    public record RunMessage(
-        int N,
-        int f,
-        float alpha,
-        int hold_ms,
-        int timeout_ms
-    ) {}
-
-    public record DecidedMessage(long system_time) {}
-
-    public record ReportMessage() {}
 }
