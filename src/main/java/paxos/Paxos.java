@@ -89,7 +89,7 @@ public class Paxos extends AbstractActor {
             actors.add(
                 getContext()
                     .getSystem()
-                    .actorOf(Process.props(), String.valueOf(i))
+                    .actorOf(Process.props(i, run_message.N), String.valueOf(i))
             );
         }
         alive_actors.addAll(actors);
