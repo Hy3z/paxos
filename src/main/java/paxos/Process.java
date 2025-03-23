@@ -57,6 +57,8 @@ public class Process extends AbstractActor {
             .match(Message_DECIDE.class, this::onDecide)
             .match(Paxos.CrashMessage.class, this::onCrash)
             .match(Message_ABORT.class, this::onAbort)
+            .match(Paxos.LaunchMessage.class, this::onLaunch)
+            //hold message missing
             .build();
     }
 
