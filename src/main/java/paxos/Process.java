@@ -5,7 +5,6 @@ import akka.actor.ActorRef;
 import akka.actor.Props;
 import akka.event.Logging;
 import akka.event.LoggingAdapter;
-
 import java.util.ArrayList;
 import java.util.List;
 
@@ -26,12 +25,14 @@ public class Process extends AbstractActor {
     private int ackCount = 0;
     private int gatherCount = 0;
 
-
     public static Props props(int ID, int N) {
-        return Props.create(Process.class, ID);
+        return Props.create(Process.class, ID, N);
     }
 
-    private final LoggingAdapter logger = Logging.getLogger(getContext().getSystem(), this);
+    private final LoggingAdapter logger = Logging.getLogger(
+        getContext().getSystem(),
+        this
+    );
 
     public Process(int ID, int N) {
         this.ID = ID;
@@ -48,15 +49,15 @@ public class Process extends AbstractActor {
     @Override
     public Receive createReceive() {
         return receiveBuilder()
-                .match(Paxos.ActorListMessage.class, this::onActorList)
-                .match(Message_GATHER.class, this::onGather)
-                .match(Message_ACK.class, this::onAccept)
-                .match(Message_READ.class, this::onRead)
-                .match(Message_IMPOSE.class, this::onImpose)
-                .match(Message_DECIDE.class, this::onDecide)
-                .match(Paxos.CrashMessage.class, this::onCrash)
-                .match(Message_ABORT.class, this::onAbort)
-                .build();
+            .match(Paxos.ActorListMessage.class, this::onActorList)
+            .match(Message_GATHER.class, this::onGather)
+            .match(Message_ACK.class, this::onAccept)
+            .match(Message_READ.class, this::onRead)
+            .match(Message_IMPOSE.class, this::onImpose)
+            .match(Message_DECIDE.class, this::onDecide)
+            .match(Paxos.CrashMessage.class, this::onCrash)
+            .match(Message_ABORT.class, this::onAbort)
+            .build();
     }
 
     private void onActorList(Paxos.ActorListMessage message) {
@@ -68,10 +69,10 @@ public class Process extends AbstractActor {
         decideIfCrash();
         if (!isCrashed) {
             logger.info("Proposing: {}", message.proposal);
-            this.proposal = message.proposal;            // setting the proposal
-            this.ballot += N;                       // incrementing the ballot by N
+            this.proposal = message.proposal; // setting the proposal
+            this.ballot += N; // incrementing the ballot by N
             for (State state : states) {
-                state = new State(-1, 0);  // initializing the states
+                state = new State(-1, 0); // initializing the states
             }
             for (ActorRef neighbor : myNeighbors) {
                 neighbor.tell(new Message_READ(ballot, ID), getSelf());
@@ -83,10 +84,20 @@ public class Process extends AbstractActor {
         decideIfCrash();
         if (!isCrashed) {
             if (readBallot > message.ballot || imposeBallot > message.ballot) {
-                getSender().tell(new Message_ABORT(message.ballot, ID), getSelf());
+                getSender()
+                    .tell(new Message_ABORT(message.ballot, ID), getSelf());
             } else {
                 readBallot = message.ballot;
-                getSender().tell(new Message_GATHER(message.ballot, imposeBallot, estimate, ID), getSelf());
+                getSender()
+                    .tell(
+                        new Message_GATHER(
+                            message.ballot,
+                            imposeBallot,
+                            estimate,
+                            ID
+                        ),
+                        getSelf()
+                    );
             }
         }
     }
@@ -100,7 +111,10 @@ public class Process extends AbstractActor {
     private void onGather(Message_GATHER message) {
         decideIfCrash();
         if (!isCrashed) {
-            states.set(message.ID, new State(message.imposeBallot, message.estimate));
+            states.set(
+                message.ID,
+                new State(message.imposeBallot, message.estimate)
+            );
             gatherCount++;
             if (gatherCount > (int) N / 2) {
                 int maxBallot = Integer.MIN_VALUE;
@@ -117,26 +131,31 @@ public class Process extends AbstractActor {
                     proposal = maxEstimate;
                 }
                 for (ActorRef neighbor : myNeighbors) {
-                    neighbor.tell(new Message_IMPOSE(ballot, proposal, ID), getSelf());
+                    neighbor.tell(
+                        new Message_IMPOSE(ballot, proposal, ID),
+                        getSelf()
+                    );
                 }
             }
         }
     }
 
-    private void onImpose (Message_IMPOSE message) {
+    private void onImpose(Message_IMPOSE message) {
         decideIfCrash();
         if (!isCrashed) {
             if (readBallot > message.ballot || imposeBallot > message.ballot) {
-                getSender().tell(new Message_ABORT(message.ballot, ID), getSelf());
+                getSender()
+                    .tell(new Message_ABORT(message.ballot, ID), getSelf());
             } else {
                 imposeBallot = message.ballot;
                 estimate = message.proposal;
-                getSender().tell(new Message_ACK(message.ballot, ID), getSelf());
+                getSender()
+                    .tell(new Message_ACK(message.ballot, ID), getSelf());
             }
         }
     }
 
-    private void onAccept (Message_ACK message) {
+    private void onAccept(Message_ACK message) {
         decideIfCrash();
         if (!isCrashed) {
             ackCount++;
@@ -149,7 +168,7 @@ public class Process extends AbstractActor {
         }
     }
 
-    private int onDecide (Message_DECIDE message) {
+    private int onDecide(Message_DECIDE message) {
         decideIfCrash();
         for (ActorRef neighbor : myNeighbors) {
             neighbor.tell(new Message_DECIDE(message.value, ID), getSelf());
@@ -160,15 +179,15 @@ public class Process extends AbstractActor {
         return message.value;
     }
 
-    private void onCrash (Paxos.CrashMessage message){
+    private void onCrash(Paxos.CrashMessage message) {
         logger.info("Received crash message: {}", message);
         this.crash_prob = message.alpha();
     }
 
-    private void onLaunch (Paxos.LaunchMessage message){
+    private void onLaunch(Paxos.LaunchMessage message) {
         int propose = (int) (Math.random() * 2);
         if (propose == 0) {
-                propose(new Message_PROPOSE(0, ID));
+            propose(new Message_PROPOSE(0, ID));
         } else {
             propose(new Message_PROPOSE(1, ID));
         }
@@ -181,51 +200,49 @@ public class Process extends AbstractActor {
         }
     }
 
-
-    public void setBallot (int ballot){
+    public void setBallot(int ballot) {
         this.ballot = ballot;
     }
 
-    public int getBallot () {
+    public int getBallot() {
         return this.ballot;
     }
 
-    public void setReadBallot ( int readBallot){
+    public void setReadBallot(int readBallot) {
         this.readBallot = readBallot;
     }
 
-    public int getReadBallot () {
+    public int getReadBallot() {
         return this.readBallot;
     }
 
-    public void setProposal ( int proposal){
+    public void setProposal(int proposal) {
         this.proposal = proposal;
     }
 
-    public int getProposal () {
+    public int getProposal() {
         return this.proposal;
     }
 
-    public void setImposeBallot ( int imposeBallot){
+    public void setImposeBallot(int imposeBallot) {
         this.imposeBallot = imposeBallot;
     }
 
-    public int getImposeBallot () {
+    public int getImposeBallot() {
         return this.imposeBallot;
     }
 
-    public void setEstimate ( int estimate){
+    public void setEstimate(int estimate) {
         this.estimate = estimate;
     }
 
-    public int getEstimate () {
+    public int getEstimate() {
         return this.estimate;
     }
 
-    public int getID () {
+    public int getID() {
         return this.ID;
     }
-
 
     // a record to build the States list
     public record State(int ballot, int estimate) {}
@@ -236,7 +253,12 @@ public class Process extends AbstractActor {
     public record Message_ABORT(int ballot, int ID) {}
 
     // same for these ballot et imposeballot
-    public record Message_GATHER(int ballot, int imposeBallot, int estimate, int ID) {}
+    public record Message_GATHER(
+        int ballot,
+        int imposeBallot,
+        int estimate,
+        int ID
+    ) {}
 
     public record Message_ACK(int ballot, int ID) {}
 
@@ -246,5 +268,4 @@ public class Process extends AbstractActor {
 
     // value is either 0 or 1
     public record Message_DECIDE(int value, int ID) {}
-
 }
