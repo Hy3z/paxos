@@ -48,7 +48,7 @@ public class Paxos extends AbstractActor {
             "system_actor"
         );
         system_actor.tell(
-            new RunMessage(50, 10, .1f, 100, 50),
+            new RunMessage(3, 1, .1f, 100, 50),
             ActorRef.noSender()
         );
         Thread.sleep(10000); //Wait for the system to finish
@@ -73,7 +73,8 @@ public class Paxos extends AbstractActor {
     public Receive createReceive() {
         return receiveBuilder()
             .match(DecidedMessage.class, decidedMessage -> {
-                end_time = Math.min(end_time, decidedMessage.system_time());
+                end_time = decidedMessage.system_time();
+                logger.info("end time is: " + end_time);
             })
             .match(ReportMessage.class, report_message -> {
                 logger.info("Time taken: " + (end_time - start_time) + "ms");
