@@ -101,7 +101,7 @@ public class Process extends AbstractActor {
                 getSender().tell(new Message_ABORT(message.ballot, ID, instanceCounter), getSelf());    // Sending ABORT to all
                 logger.info("{}. Instance {} : ABORT", this.ID, instanceCounter);
                 if (!onHold) {
-                    proposing();        // When aborting we start a new instance (if not put on hold by the Paxos actor), so on and so forth until decided
+                    proposing();                                                                        // When aborting we start a new instance (if not put on hold by the Paxos actor), so on and so forth until decided
                 }
             } else {
                 readBallot = message.ballot;                                                            // Sending GATHER to all and updating our readballot
@@ -112,7 +112,7 @@ public class Process extends AbstractActor {
 
     private void onAbort(Message_ABORT message) {
         decideIfCrash();
-        if (!isCrashed && !decided) {                           // Received an ABORT message, we abort the corresponding instance
+        if (!isCrashed && !decided) {                                                                   // Received an ABORT message, we abort the corresponding instance
             logger.info("{}. Received ABORT from actor {}, aborting instance {}", this.ID, message.ID, message.instanceNumber);
             if (!onHold) {
                 proposing();
@@ -130,8 +130,8 @@ public class Process extends AbstractActor {
                 logger.info("{}. Gathered enough states, proceeding to impose.", this.ID);
                 int maxBallot = Integer.MIN_VALUE;
                 int maxEstimate = -1;
-                for (State state : states) {
-                    if (state.ballot > maxBallot) {
+                for (State state : states) {                                                               // Computing the max ballot from the States list and then checking if it is positive
+                    if (state.ballot > maxBallot) {                                                        // In the reverse order from the algorithm since it is simpler this way
                         maxBallot = state.ballot;
                         maxEstimate = state.estimate;
                     }
@@ -140,7 +140,7 @@ public class Process extends AbstractActor {
                     proposal = maxEstimate;
                 }
                 for (State state : states) {
-                    state = new State(-1, 0); // resetting the states
+                    state = new State(-1, 0);                                                // resetting the states
                 }
                 for (ActorRef neighbor : myNeighbors) {
                     neighbor.tell(new Message_IMPOSE(ballot, proposal, ID, instanceCounter), getSelf());
@@ -170,13 +170,13 @@ public class Process extends AbstractActor {
         decideIfCrash();
         if (!isCrashed && !decided) {
             ackCount++;
-            if (ackCount > (int) N / 2) {
+            if (ackCount > (int) N / 2) {                                                               // When received ACK messages from a quorum the decided value is set
                 decided = true;
                 for (ActorRef neighbor : myNeighbors) {
-                    neighbor.tell(new Message_DECIDE(proposal, ID, instanceCounter), getSelf());
+                    neighbor.tell(new Message_DECIDE(proposal, ID, instanceCounter), getSelf());        // Sending DECIDE to all
                     logger.info("{}. Instance {}. Sending {} to neighbor {}.", this.ID, message.instanceNumber, proposal, message.ID);
                 }
-                long endTime = System.nanoTime();
+                long endTime = System.nanoTime();                                                       // Computing the elapsed time to send to the Paxos actor
                 reportActor.tell(new Paxos.DecidedMessage((endTime - startTime), instanceCounter), getSelf());
                 logger.info("{}. Instance no: {} terminated with a decided value: {}.", this.ID, instanceCounter, proposal);
                 //if (!onHold) {
@@ -189,7 +189,7 @@ public class Process extends AbstractActor {
     private void onDecide(Message_DECIDE message) {
         decideIfCrash();
         if (!isCrashed && !decided) {
-            long endTime = System.nanoTime();
+            long endTime = System.nanoTime();                                                           // Computing the elapsed time to send to the Paxos actor
             reportActor.tell(new Paxos.DecidedMessage((endTime - startTime), instanceCounter), getSelf());
             logger.info("{}. Instance no: {} terminated with a decided value: {} as received by {}.", this.ID, instanceCounter, message.value, message.ID);
             decided = true;
@@ -201,26 +201,26 @@ public class Process extends AbstractActor {
 
     private void onCrash(Paxos.CrashMessage message) {
         logger.info("{}. Received crash message: {}", this.ID, message);
-        this.crash_prob = message.alpha();
+        this.crash_prob = message.alpha();                                                              // Setting the crash probability
     }
 
-    private void onLaunch(Paxos.LaunchMessage message) throws InterruptedException{
+    private void onLaunch(Paxos.LaunchMessage message) throws InterruptedException {
         proposing();
     }
 
     private void onHold(Paxos.HoldMessage message) {
         onHold = true;
-        logger.info("{}. On hold !", this.ID);
+        logger.info("{}. On hold !", this.ID);                                                  // Setting the onHold boolean to go quiet and not propose anymore
     }
 
 
-
+// Main function to send PROPOSE messages, used a bunch of times for readability
     private void proposing() {
         instanceCounter++;
-        ackCount = 0;
+        ackCount = 0;                                                                                   // Resetting counters
         gatherCount = 0;
         logger.info("{}. Launching new instance: {}", this.ID, instanceCounter);
-        int propose = (int) (Math.random() * 2);
+        int propose = (int) (Math.random() * 2);                                                        // Choosing a random proposal between 0 and 1
         if (propose == 0) {
             propose(new Message_PROPOSE(0, ID, instanceCounter));
         } else {
