@@ -21,7 +21,7 @@ public class Paxos extends AbstractActor {
     ) {}
 
     //system_time is the time at which the system decided, get it by calling System.currentTimeMillis()
-    public record DecidedMessage(long system_time) {}
+    public record DecidedMessage(long system_time, int instanceNumber) {}
 
     //tell the report actor (here,the system actor) to report the time taken
     public record ReportMessage() {}
@@ -73,11 +73,13 @@ public class Paxos extends AbstractActor {
     public Receive createReceive() {
         return receiveBuilder()
             .match(DecidedMessage.class, decidedMessage -> {
-                end_time = decidedMessage.system_time();
-                logger.info("end time is: " + end_time);
+                if (end_time > decidedMessage.system_time()) {
+                    end_time = decidedMessage.system_time();
+                }
+                logger.info("Instance no {} terminated in: " + end_time + "ms", decidedMessage.instanceNumber());
             })
             .match(ReportMessage.class, report_message -> {
-                logger.info("Time taken: " + (end_time - start_time) + "ms");
+                logger.info("Finished in an average time {}", end_time);
             })
             .match(RunMessage.class, this::run)
             .build();

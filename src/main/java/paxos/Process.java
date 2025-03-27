@@ -5,6 +5,8 @@ import akka.actor.ActorRef;
 import akka.actor.Props;
 import akka.event.Logging;
 import akka.event.LoggingAdapter;
+
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -24,7 +26,7 @@ public class Process extends AbstractActor {
     private boolean isCrashed;
     private int ackCount = 0;
     private int gatherCount = 0;
-    private long startTime = System.currentTimeMillis();
+    private long startTime;
     private int instanceCounter = 0;
     private boolean onHold = false;
 
@@ -76,6 +78,8 @@ public class Process extends AbstractActor {
     private void propose(Message_PROPOSE message) {
         decideIfCrash();
         if (!isCrashed) {
+            // TODO : Timer ?
+            this.startTime = System.nanoTime();
             logger.info("Proposing: {}", message.proposal);
             this.proposal = message.proposal; // setting the proposal
             this.ballot += N; // incrementing the ballot by N
@@ -94,6 +98,10 @@ public class Process extends AbstractActor {
             logger.info("Received read message: {}", message);
             if (readBallot > message.ballot || imposeBallot > message.ballot) {
                 getSender().tell(new Message_ABORT(message.ballot, ID), getSelf());
+                logger.info("Aborting instance no: {}", instanceCounter);
+                if (!onHold) {
+                    proposing();
+                }
             } else {
                 readBallot = message.ballot;
                 getSender().tell(new Message_GATHER(message.ballot, imposeBallot, estimate, ID), getSelf());
@@ -104,10 +112,10 @@ public class Process extends AbstractActor {
     private void onAbort(Message_ABORT message) {
         decideIfCrash();
         if (!isCrashed) {
-            logger.info("Received abort message: {}", message);
-            ackCount = 0;
-            gatherCount = 0;
-            proposing();
+            logger.info("Received abort message: {}, aborting instance no {}", message, instanceCounter);
+            if (!onHold) {
+                proposing();
+            }
         }
     }
 
@@ -115,16 +123,16 @@ public class Process extends AbstractActor {
         decideIfCrash();
         if (!isCrashed) {
             states.set(message.ID, new State(message.imposeBallot, message.estimate));
+            logger.info("Setting state for ID: {}", message.ID);
             gatherCount++;
-            if (gatherCount > (int) N / 2) {
+            if (gatherCount >= (int) N / 2) {
+                logger.info("Gathered enough states, proceeding to impose.");
                 int maxBallot = Integer.MIN_VALUE;
                 int maxEstimate = -1;
-                int index = 0;
                 for (State state : states) {
                     if (state.ballot > maxBallot) {
                         maxBallot = state.ballot;
                         maxEstimate = state.estimate;
-                        index = states.indexOf(state);
                     }
                 }
                 if (maxBallot > 0) {
@@ -145,6 +153,8 @@ public class Process extends AbstractActor {
         if (!isCrashed) {
             if (readBallot > message.ballot || imposeBallot > message.ballot) {
                 getSender().tell(new Message_ABORT(message.ballot, ID), getSelf());
+                logger.info("Aborting instance no: {}", instanceCounter);
+                proposing();
             } else {
                 imposeBallot = message.ballot;
                 estimate = message.proposal;
@@ -161,12 +171,12 @@ public class Process extends AbstractActor {
                 for (ActorRef neighbor : myNeighbors) {
                     neighbor.tell(new Message_DECIDE(proposal, ID), getSelf());
                 }
-                ackCount = 0;
-                logger.info("Instance no: {} terminated.", instanceCounter);
-                logger.info("Decided: {}", proposal);
-                if (!onHold) {
-                    proposing();
-                }
+                long endTime = System.nanoTime();
+                reportActor.tell(new Paxos.DecidedMessage((endTime - startTime), instanceCounter), getSelf());
+                logger.info("Instance no: {} terminated with a decided value: {}.", instanceCounter, proposal);
+                //if (!onHold) {
+                //    proposing();
+                //}
             }
         }
     }
@@ -174,14 +184,12 @@ public class Process extends AbstractActor {
     private void onDecide(Message_DECIDE message) {
         decideIfCrash();
         if (!isCrashed) {
-            gatherCount = 0;
-            ackCount = 0;
-            reportActor.tell(new Paxos.DecidedMessage((System.currentTimeMillis() - startTime)), getSelf());
-            logger.info("Instance no: {} terminated.", instanceCounter);
-            logger.info("Decided: {}", message.value);
-            if (!onHold) {
-                proposing();
-            }
+            long endTime = System.nanoTime();
+            reportActor.tell(new Paxos.DecidedMessage((endTime - startTime), instanceCounter), getSelf());
+            logger.info("Instance no: {} terminated with a decided value: {}.", instanceCounter, message.value);
+            //if (!onHold) {
+            //    proposing();
+            //}
         }
     }
 
@@ -190,16 +198,19 @@ public class Process extends AbstractActor {
         this.crash_prob = message.alpha();
     }
 
-    private void onLaunch(Paxos.LaunchMessage message) {
+    private void onLaunch(Paxos.LaunchMessage message) throws InterruptedException{
         proposing();
     }
 
     private void onHold(Paxos.HoldMessage message) {
         onHold = true;
+        logger.info("On hold !");
     }
 
     private void proposing() {
         instanceCounter++;
+        ackCount = 0;
+        gatherCount = 0;
         logger.info("Launching new instance: {}", instanceCounter);
         int propose = (int) (Math.random() * 2);
         if (propose == 0) {
@@ -211,8 +222,9 @@ public class Process extends AbstractActor {
 
     private void decideIfCrash() {
         float rand = (float) Math.random();
-        if (rand < crash_prob) {
+        if (rand < crash_prob && !isCrashed) {
             isCrashed = true;
+            logger.info("Crashing !");
         }
     }
 
