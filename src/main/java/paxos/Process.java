@@ -29,6 +29,7 @@ public class Process extends AbstractActor {
     private long startTime;
     private int instanceCounter = 0;
     private boolean onHold = false;
+    private boolean decided = false;
 
     public static Props props(int ID, int N) {
         return Props.create(Process.class, ID, N);
@@ -71,48 +72,48 @@ public class Process extends AbstractActor {
     }
 
     private void onActorList(Paxos.ActorListMessage message) {
-        myNeighbors = message.actors();
-        reportActor = message.report_actor();
+        myNeighbors = message.actors();                        // Receive message from the Paxos actor, setting the list of the other actors to send messages to
+        reportActor = message.report_actor();                  // And setting up the reference to the Paxos actor to send him the time taken to decide on a value
     }
 
     private void propose(Message_PROPOSE message) {
         decideIfCrash();
-        if (!isCrashed) {
-            // TODO : Timer ?
-            this.startTime = System.nanoTime();
-            logger.info("Proposing: {}", message.proposal);
-            this.proposal = message.proposal; // setting the proposal
-            this.ballot += N; // incrementing the ballot by N
+        if (!isCrashed && !decided) {                          // For every action in the algorithm, check if the process is correct and has not yet decided
+            getContext().system().scheduler().scheduleOnce(Duration.ofMillis(1000), getSelf(), "Waiting 1s for next instance.", getContext().system().dispatcher(), ActorRef.noSender());
+            this.startTime = System.nanoTime();                // Time is measured up in nanoseconds since it usually takes less than a millisecond with N = 3
+            logger.info("{}. Instance {}, proposing: {}.", this.ID, instanceCounter, message.proposal);
+            this.proposal = message.proposal;                  // setting the proposal
+            this.ballot += N;                                  // incrementing the ballot by N
             for (State state : states) {
-                state = new State(-1, 0); // resetting the states
+                state = new State(-1, 0);        // resetting the states
             }
-            for (ActorRef neighbor : myNeighbors) {
-                neighbor.tell(new Message_READ(ballot, ID), getSelf());
+            for (ActorRef neighbor : myNeighbors) {            // Sending a READ message to all, as for evey message sent, we send our ID and the instance number we are in
+                neighbor.tell(new Message_READ(ballot, ID, instanceCounter), getSelf());
             }
         }
     }
 
     private void onRead(Message_READ message) {
         decideIfCrash();
-        if (!isCrashed) {
-            logger.info("Received read message: {}", message);
-            if (readBallot > message.ballot || imposeBallot > message.ballot) {
-                getSender().tell(new Message_ABORT(message.ballot, ID), getSelf());
-                logger.info("Aborting instance no: {}", instanceCounter);
+        if (!isCrashed && !decided) {
+            logger.info("{}. Instance {}. Received READ from {},", this.ID, message.instanceNumber, message.ID);
+            if (readBallot > message.ballot || imposeBallot > message.ballot) {                         // Condition from the algo if not met, we abort the current instance
+                getSender().tell(new Message_ABORT(message.ballot, ID, instanceCounter), getSelf());    // Sending ABORT to all
+                logger.info("{}. Instance {} : ABORT", this.ID, instanceCounter);
                 if (!onHold) {
-                    proposing();
+                    proposing();        // When aborting we start a new instance (if not put on hold by the Paxos actor), so on and so forth until decided
                 }
             } else {
-                readBallot = message.ballot;
-                getSender().tell(new Message_GATHER(message.ballot, imposeBallot, estimate, ID), getSelf());
+                readBallot = message.ballot;                                                            // Sending GATHER to all and updating our readballot
+                getSender().tell(new Message_GATHER(message.ballot, imposeBallot, estimate, ID, instanceCounter), getSelf());
             }
         }
     }
 
     private void onAbort(Message_ABORT message) {
         decideIfCrash();
-        if (!isCrashed) {
-            logger.info("Received abort message: {}, aborting instance no {}", message, instanceCounter);
+        if (!isCrashed && !decided) {                           // Received an ABORT message, we abort the corresponding instance
+            logger.info("{}. Received ABORT from actor {}, aborting instance {}", this.ID, message.ID, message.instanceNumber);
             if (!onHold) {
                 proposing();
             }
@@ -121,12 +122,12 @@ public class Process extends AbstractActor {
 
     private void onGather(Message_GATHER message) {
         decideIfCrash();
-        if (!isCrashed) {
+        if (!isCrashed && !decided) {
             states.set(message.ID, new State(message.imposeBallot, message.estimate));
-            logger.info("Setting state for ID: {}", message.ID);
+            logger.info("{}. Received GATHER from actor {} with impose ballot = {}", this.ID, message.ID, message.imposeBallot);
             gatherCount++;
             if (gatherCount >= (int) N / 2) {
-                logger.info("Gathered enough states, proceeding to impose.");
+                logger.info("{}. Gathered enough states, proceeding to impose.", this.ID);
                 int maxBallot = Integer.MIN_VALUE;
                 int maxEstimate = -1;
                 for (State state : states) {
@@ -142,7 +143,7 @@ public class Process extends AbstractActor {
                     state = new State(-1, 0); // resetting the states
                 }
                 for (ActorRef neighbor : myNeighbors) {
-                    neighbor.tell(new Message_IMPOSE(ballot, proposal, ID), getSelf());
+                    neighbor.tell(new Message_IMPOSE(ballot, proposal, ID, instanceCounter), getSelf());
                 }
             }
         }
@@ -150,30 +151,34 @@ public class Process extends AbstractActor {
 
     private void onImpose(Message_IMPOSE message) {
         decideIfCrash();
-        if (!isCrashed) {
-            if (readBallot > message.ballot || imposeBallot > message.ballot) {
-                getSender().tell(new Message_ABORT(message.ballot, ID), getSelf());
-                logger.info("Aborting instance no: {}", instanceCounter);
-                proposing();
+        if (!isCrashed && !decided) {
+            if (readBallot > message.ballot || imposeBallot > message.ballot) {                          // Another condition from the algorithm if met -> ABORT current instance
+                getSender().tell(new Message_ABORT(message.ballot, ID, instanceCounter), getSelf());     // Send ABORT to all
+                logger.info("{}. On IMPOSE from actor {}. Aborting instance no: {} because " + readBallot + " > " + message.ballot + " or " + imposeBallot + " > " + message.ballot, message.ID, this.ID, instanceCounter);
+                if (!onHold) {
+                    proposing();
+                }
             } else {
                 imposeBallot = message.ballot;
-                estimate = message.proposal;
-                getSender().tell(new Message_ACK(message.ballot, ID), getSelf());
+                estimate = message.proposal;                                                            // Updating the imposeBallot and estimation
+                getSender().tell(new Message_ACK(message.ballot, ID, instanceCounter), getSelf());      // Sending ACK back to the sender
             }
         }
     }
 
     private void onAccept(Message_ACK message) {
         decideIfCrash();
-        if (!isCrashed) {
+        if (!isCrashed && !decided) {
             ackCount++;
             if (ackCount > (int) N / 2) {
+                decided = true;
                 for (ActorRef neighbor : myNeighbors) {
-                    neighbor.tell(new Message_DECIDE(proposal, ID), getSelf());
+                    neighbor.tell(new Message_DECIDE(proposal, ID, instanceCounter), getSelf());
+                    logger.info("{}. Instance {}. Sending {} to neighbor {}.", this.ID, message.instanceNumber, proposal, message.ID);
                 }
                 long endTime = System.nanoTime();
                 reportActor.tell(new Paxos.DecidedMessage((endTime - startTime), instanceCounter), getSelf());
-                logger.info("Instance no: {} terminated with a decided value: {}.", instanceCounter, proposal);
+                logger.info("{}. Instance no: {} terminated with a decided value: {}.", this.ID, instanceCounter, proposal);
                 //if (!onHold) {
                 //    proposing();
                 //}
@@ -183,10 +188,11 @@ public class Process extends AbstractActor {
 
     private void onDecide(Message_DECIDE message) {
         decideIfCrash();
-        if (!isCrashed) {
+        if (!isCrashed && !decided) {
             long endTime = System.nanoTime();
             reportActor.tell(new Paxos.DecidedMessage((endTime - startTime), instanceCounter), getSelf());
-            logger.info("Instance no: {} terminated with a decided value: {}.", instanceCounter, message.value);
+            logger.info("{}. Instance no: {} terminated with a decided value: {} as received by {}.", this.ID, instanceCounter, message.value, message.ID);
+            decided = true;
             //if (!onHold) {
             //    proposing();
             //}
@@ -194,7 +200,7 @@ public class Process extends AbstractActor {
     }
 
     private void onCrash(Paxos.CrashMessage message) {
-        logger.info("Received crash message: {}", message);
+        logger.info("{}. Received crash message: {}", this.ID, message);
         this.crash_prob = message.alpha();
     }
 
@@ -204,19 +210,21 @@ public class Process extends AbstractActor {
 
     private void onHold(Paxos.HoldMessage message) {
         onHold = true;
-        logger.info("On hold !");
+        logger.info("{}. On hold !", this.ID);
     }
+
+
 
     private void proposing() {
         instanceCounter++;
         ackCount = 0;
         gatherCount = 0;
-        logger.info("Launching new instance: {}", instanceCounter);
+        logger.info("{}. Launching new instance: {}", this.ID, instanceCounter);
         int propose = (int) (Math.random() * 2);
         if (propose == 0) {
-            propose(new Message_PROPOSE(0, ID));
+            propose(new Message_PROPOSE(0, ID, instanceCounter));
         } else {
-            propose(new Message_PROPOSE(1, ID));
+            propose(new Message_PROPOSE(1, ID, instanceCounter));
         }
     }
 
@@ -224,34 +232,37 @@ public class Process extends AbstractActor {
         float rand = (float) Math.random();
         if (rand < crash_prob && !isCrashed) {
             isCrashed = true;
-            logger.info("Crashing !");
+            logger.info("{}. Crashing !", this.ID);
         }
     }
+
+
 
     // a record to build the States list
     public record State(int ballot, int estimate) {}
 
-    public record Message_READ(int ballot, int ID) {}
+    public record Message_READ(int ballot, int ID, int instanceNumber) {}
 
     // ballot can be negative
-    public record Message_ABORT(int ballot, int ID) {}
+    public record Message_ABORT(int ballot, int ID, int instanceNumber) {}
 
     // same for these ballot et imposeballot
     public record Message_GATHER(
             int ballot,
             int imposeBallot,
             int estimate,
-            int ID
+            int ID,
+            int instanceNumber
     ) {}
 
-    public record Message_ACK(int ballot, int ID) {}
+    public record Message_ACK(int ballot, int ID, int instanceNumber) {}
 
-    public record Message_IMPOSE(int ballot, int proposal, int ID) {}
+    public record Message_IMPOSE(int ballot, int proposal, int ID, int instanceNumber) {}
 
-    public record Message_PROPOSE(int proposal, int ID) {}
+    public record Message_PROPOSE(int proposal, int ID, int instanceNumber) {}
 
-    // value is either 0 or 1
-    public record Message_DECIDE(int value, int ID) {}
+    // Decided value is either 0 or 1
+    public record Message_DECIDE(int value, int ID, int instanceNumber) {}
 
 
 

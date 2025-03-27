@@ -76,10 +76,10 @@ public class Paxos extends AbstractActor {
                 if (end_time > decidedMessage.system_time()) {
                     end_time = decidedMessage.system_time();
                 }
-                logger.info("Instance no {} terminated in: " + end_time + "ms", decidedMessage.instanceNumber());
+                logger.info("Instance no {} terminated in: " + end_time + "ns", decidedMessage.instanceNumber());
             })
             .match(ReportMessage.class, report_message -> {
-                logger.info("Finished in an average time {}", end_time);
+                logger.info("Finished in a minimum time {}ns", end_time);
             })
             .match(RunMessage.class, this::run)
             .build();
