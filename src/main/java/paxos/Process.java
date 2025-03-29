@@ -14,7 +14,7 @@ import java.util.concurrent.TimeUnit;
 
 public class Process extends AbstractActor {
 
-    private static final int TIMEOUT = 250;
+    private static final int TIMEOUT = 1000;
     private final int ID;
     private final int N;
     private int ballot;
@@ -135,14 +135,14 @@ public class Process extends AbstractActor {
                     this.ID,
                     instanceCounter
                     );*/
-                if (!onHold) {
+                /*if (!onHold) {
                     // When aborting we start a new instance (if not put on hold by the Paxos actor), so on and so forth until decided
                     scheduler.schedule(
                         () -> proposing(),
                         TIMEOUT,
                         TimeUnit.MILLISECONDS
                     );
-                }
+                }*/
             } else {
                 readBallot = message.ballot; // Sending GATHER to all and updating our readballot
                 getSender()
@@ -249,13 +249,13 @@ public class Process extends AbstractActor {
                     this.ID,
                     instanceCounter
                     );*/
-                if (!onHold) {
+                /*if (!onHold) {
                     scheduler.schedule(
                         () -> proposing(),
                         TIMEOUT,
                         TimeUnit.MILLISECONDS
                     );
-                }
+                }*/
             } else {
                 imposeBallot = message.ballot;
                 estimate = message.proposal; // Updating the imposeBallot and estimation

@@ -55,6 +55,7 @@ public class Paxos extends AbstractActor {
         );
         Thread.sleep(15000); //Wait for the system to finish
         system_actor.tell(new ReportMessage(), ActorRef.noSender()); //Report the time taken
+        Thread.sleep(1000); //Wait for the response
         system.terminate();
         System.exit(0);
     }
