@@ -48,10 +48,10 @@ public class Paxos extends AbstractActor {
             "system_actor"
         );
         system_actor.tell(
-            new RunMessage(3, 1, .1f, 100, 50),
+            new RunMessage(4, 1, .1f, 100, 50),
             ActorRef.noSender()
         );
-        Thread.sleep(10000); //Wait for the system to finish
+        Thread.sleep(7500); //Wait for the system to finish
         system_actor.tell(new ReportMessage(), ActorRef.noSender()); //Report the time taken
         system.terminate();
     }
@@ -66,20 +66,26 @@ public class Paxos extends AbstractActor {
     );
 
     long start_time = 0;
-
     long end_time = Long.MAX_VALUE;
+    int instance_number = Integer.MAX_VALUE;
 
     @Override
     public Receive createReceive() {
         return receiveBuilder()
             .match(DecidedMessage.class, decidedMessage -> {
-                if (end_time > decidedMessage.system_time()) {
+                if (decidedMessage.instanceNumber() < instance_number) {
+                    instance_number = decidedMessage.instanceNumber();
                     end_time = decidedMessage.system_time();
+                } else if (decidedMessage.instanceNumber() == instance_number) {
+                    end_time = Math.min(end_time, decidedMessage.system_time());
                 }
-                logger.info("Instance no {} terminated in: " + end_time + "ns", decidedMessage.instanceNumber());
             })
             .match(ReportMessage.class, report_message -> {
-                logger.info("Finished in a minimum time {}ns", end_time);
+                logger.info(
+                    "Finished at instance {} in a minimum time {}ms",
+                    instance_number,
+                    end_time - start_time
+                );
             })
             .match(RunMessage.class, this::run)
             .build();
