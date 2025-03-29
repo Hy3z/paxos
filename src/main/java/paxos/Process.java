@@ -8,9 +8,13 @@ import akka.event.LoggingAdapter;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 public class Process extends AbstractActor {
 
+    private static final int TIMEOUT = 250;
     private final int ID;
     private final int N;
     private int ballot;
@@ -29,6 +33,8 @@ public class Process extends AbstractActor {
     private int instanceCounter = 0;
     private boolean onHold = false;
     private boolean decided = false;
+    private final ScheduledExecutorService scheduler =
+        Executors.newScheduledThreadPool(1);
 
     public static Props props(int ID, int N) {
         return Props.create(Process.class, ID, N);
@@ -78,7 +84,7 @@ public class Process extends AbstractActor {
     private void propose(Message_PROPOSE message) {
         decideIfCrash();
         if (!isCrashed && !decided) { // For every action in the algorithm, check if the process is correct and has not yet decided
-            getContext()
+            /*getContext()
                 .system()
                 .scheduler()
                 .scheduleOnce(
@@ -87,7 +93,7 @@ public class Process extends AbstractActor {
                     "Waiting 1s for next instance.",
                     getContext().system().dispatcher(),
                     ActorRef.noSender()
-                );
+                );*/
             //this.startTime = System.nanoTime(); // Time is measured up in nanoseconds since it usually takes less than a millisecond with N = 3
             /*logger.info(
                 "{}. Instance {}, proposing: {}.",
@@ -130,7 +136,12 @@ public class Process extends AbstractActor {
                     instanceCounter
                     );*/
                 if (!onHold) {
-                    proposing(); // When aborting we start a new instance (if not put on hold by the Paxos actor), so on and so forth until decided
+                    // When aborting we start a new instance (if not put on hold by the Paxos actor), so on and so forth until decided
+                    scheduler.schedule(
+                        () -> proposing(),
+                        TIMEOUT,
+                        TimeUnit.MILLISECONDS
+                    );
                 }
             } else {
                 readBallot = message.ballot; // Sending GATHER to all and updating our readballot
@@ -159,7 +170,11 @@ public class Process extends AbstractActor {
                 message.instanceNumber
                 );*/
             if (!onHold) {
-                proposing();
+                scheduler.schedule(
+                    () -> proposing(),
+                    TIMEOUT,
+                    TimeUnit.MILLISECONDS
+                );
             }
         }
     }
@@ -235,7 +250,11 @@ public class Process extends AbstractActor {
                     instanceCounter
                     );*/
                 if (!onHold) {
-                    proposing();
+                    scheduler.schedule(
+                        () -> proposing(),
+                        TIMEOUT,
+                        TimeUnit.MILLISECONDS
+                    );
                 }
             } else {
                 imposeBallot = message.ballot;
@@ -318,12 +337,14 @@ public class Process extends AbstractActor {
 
     private void onLaunch(Paxos.LaunchMessage message)
         throws InterruptedException {
-        proposing();
+        if (!isCrashed && !decided && !onHold) {
+            proposing();
+        }
     }
 
     private void onHold(Paxos.HoldMessage message) {
         onHold = true;
-        //logger.info("{}. On hold !", this.ID); // Setting the onHold boolean to go quiet and not propose anymore
+        logger.info("{}. On hold !", this.ID); // Setting the onHold boolean to go quiet and not propose anymore
     }
 
     // Main function to send PROPOSE messages, used a bunch of times for readability
@@ -331,7 +352,7 @@ public class Process extends AbstractActor {
         instanceCounter++;
         ackCount = 0; // Resetting counters
         gatherCount = 0;
-        //logger.info("{}. Launching new instance: {}", this.ID, instanceCounter);
+        logger.info("{}. Launching new instance: {}", this.ID, instanceCounter);
         int propose = (int) (Math.random() * 2); // Choosing a random proposal between 0 and 1
         if (propose == 0) {
             propose(new Message_PROPOSE(0, ID, instanceCounter));

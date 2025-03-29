@@ -48,12 +48,15 @@ public class Paxos extends AbstractActor {
             "system_actor"
         );
         system_actor.tell(
-            new RunMessage(4, 1, .1f, 100, 50),
+            //new RunMessage(3, 1, 0f, 100, 500),
+            //new RunMessage(10, 4, .1f, 100, 1000),
+            new RunMessage(100, 50, 1f, 1000, 500),
             ActorRef.noSender()
         );
-        Thread.sleep(7500); //Wait for the system to finish
+        Thread.sleep(15000); //Wait for the system to finish
         system_actor.tell(new ReportMessage(), ActorRef.noSender()); //Report the time taken
         system.terminate();
+        System.exit(0);
     }
 
     final List<ActorRef> actors = new ArrayList<>();
@@ -81,6 +84,10 @@ public class Paxos extends AbstractActor {
                 }
             })
             .match(ReportMessage.class, report_message -> {
+                if (instance_number == Integer.MAX_VALUE) {
+                    logger.info("No instance decided");
+                    return;
+                }
                 logger.info(
                     "Finished at instance {} in a minimum time {}ms",
                     instance_number,
@@ -145,9 +152,11 @@ public class Paxos extends AbstractActor {
         //Send a hold message to all alive actors but one
         logger.info("Sending hold messages...");
         Collections.shuffle(alive_actors);
-        for (int i = 1; i < alive_actors.size(); i++) {
-            final ActorRef alive_actor = alive_actors.get(i);
-            alive_actor.tell(new HoldMessage(), getSelf());
+        ActorRef leader = alive_actors.get(0);
+        for (ActorRef actor : actors) {
+            if (!actor.equals(leader)) {
+                actor.tell(new HoldMessage(), getSelf());
+            }
         }
         logger.info("Sent.");
     }
