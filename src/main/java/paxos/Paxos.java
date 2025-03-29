@@ -50,7 +50,7 @@ public class Paxos extends AbstractActor {
         system_actor.tell(
             //new RunMessage(3, 1, 0f, 100, 500),
             //new RunMessage(10, 4, .1f, 100, 1000),
-            new RunMessage(100, 50, 1f, 1000, 500),
+            new RunMessage(100, 49, 1f, 1000, 1500),
             ActorRef.noSender()
         );
         Thread.sleep(15000); //Wait for the system to finish
@@ -106,7 +106,10 @@ public class Paxos extends AbstractActor {
             actors.add(
                 getContext()
                     .getSystem()
-                    .actorOf(Process.props(i, run_message.N), String.valueOf(i))
+                    .actorOf(
+                        Process.props(i, run_message.N()),
+                        String.valueOf(i)
+                    )
             );
         }
         alive_actors.addAll(actors);
