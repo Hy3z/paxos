@@ -21,7 +21,7 @@ public class Paxos extends AbstractActor {
     ) {}
 
     //system_time is the time at which the system decided, get it by calling System.currentTimeMillis()
-    public record DecidedMessage(long system_time, int instanceNumber) {}
+    public record DecidedMessage(long system_time, int ID, int value) {}
 
     //tell the report actor (here,the system actor) to report the time taken
     public record ReportMessage() {}
@@ -50,10 +50,10 @@ public class Paxos extends AbstractActor {
         system_actor.tell(
             //new RunMessage(3, 1, 0f, 100, 500),
             //new RunMessage(10, 4, .1f, 100, 1000),
-            new RunMessage(100, 49, 1f, 1000, 1500),
+            new RunMessage(100, 49, .1f, 1000, 1500),
             ActorRef.noSender()
         );
-        Thread.sleep(15000); //Wait for the system to finish
+        Thread.sleep(7500); //Wait for the system to finish
         system_actor.tell(new ReportMessage(), ActorRef.noSender()); //Report the time taken
         Thread.sleep(1000); //Wait for the response
         system.terminate();
@@ -71,27 +71,22 @@ public class Paxos extends AbstractActor {
 
     long start_time = 0;
     long end_time = Long.MAX_VALUE;
-    int instance_number = Integer.MAX_VALUE;
+    int decided_ID = -1;
+    int decided_value = -1;
 
     @Override
     public Receive createReceive() {
         return receiveBuilder()
             .match(DecidedMessage.class, decidedMessage -> {
-                if (decidedMessage.instanceNumber() < instance_number) {
-                    instance_number = decidedMessage.instanceNumber();
-                    end_time = decidedMessage.system_time();
-                } else if (decidedMessage.instanceNumber() == instance_number) {
-                    end_time = Math.min(end_time, decidedMessage.system_time());
-                }
+                end_time = decidedMessage.system_time();
+                decided_ID = decidedMessage.ID();
+                decided_value = decidedMessage.value();
             })
             .match(ReportMessage.class, report_message -> {
-                if (instance_number == Integer.MAX_VALUE) {
-                    logger.info("No instance decided");
-                    return;
-                }
                 logger.info(
-                    "Finished at instance {} in a minimum time {}ms",
-                    instance_number,
+                    "Decided by {} with value {} in {}ms",
+                    decided_ID,
+                    decided_value,
                     end_time - start_time
                 );
             })
@@ -157,6 +152,7 @@ public class Paxos extends AbstractActor {
         logger.info("Sending hold messages...");
         Collections.shuffle(alive_actors);
         ActorRef leader = alive_actors.get(0);
+        logger.info("Leader is {}", leader.path().name());
         for (ActorRef actor : actors) {
             if (!actor.equals(leader)) {
                 actor.tell(new HoldMessage(), getSelf());

@@ -2,11 +2,11 @@ package paxos;
 
 import java.util.ArrayList;
 
-public class InstanceData {
+public class SynodData {
 
     public record State(int estballot, int est) {}
 
-    public InstanceData(int ID, int N) {
+    public SynodData(int ID, int N) {
         this.ballot = ID - N;
         this.impose_ballot = ID - N;
         this.states = new ArrayList<>(N - 1);

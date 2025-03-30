@@ -13,33 +13,32 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadPoolExecutor.AbortPolicy;
 import java.util.concurrent.TimeUnit;
-import paxos.InstanceData;
-import paxos.InstanceData.State;
 import paxos.Paxos.ActorListMessage;
 import paxos.Paxos.CrashMessage;
 import paxos.Paxos.DecidedMessage;
 import paxos.Paxos.HoldMessage;
 import paxos.Paxos.LaunchMessage;
+import paxos.SynodData;
+import paxos.SynodData.State;
 
 public class Process extends AbstractActor {
 
-    private record ReadMessage(int ballot, int instance) {}
+    private record ReadMessage(int ballot) {}
 
-    private record AbortMessage(int ballot, int instance) {}
+    private record AbortMessage(int ballot) {}
 
     private record GatherMessage(
         int ID,
         int ballot,
         int est_ballot,
-        int estimate,
-        int instance
+        int estimate
     ) {}
 
-    private record ImposeMessage(int ballot, int proposal, int instance) {}
+    private record ImposeMessage(int ballot, int proposal) {}
 
-    private record AckMessage(int ballot, int instance) {}
+    private record AckMessage(int ballot) {}
 
-    private record DecideMessage(int proposal, int instance) {}
+    private record DecideMessage(int proposal) {}
 
     /*
     private static final int TIMEOUT = 1000;
@@ -55,9 +54,8 @@ public class Process extends AbstractActor {
     private boolean hold = false;
     private boolean crashed = false;
     private boolean decided = false;
-    private final HashMap<Integer, InstanceData> instances_data =
-        new HashMap<>();
-    private int proposed_instance = 0;
+    private final SynodData synod_data;
+    private final int proposal = (int) (Math.random() * 2);
 
     public static Props props(int ID, int N) {
         return Props.create(Process.class, ID, N);
@@ -71,30 +69,26 @@ public class Process extends AbstractActor {
     public Process(int ID, int N) {
         this.ID = ID;
         this.N = N;
+        synod_data = new SynodData(ID, N);
     }
 
+    /*
     private InstanceData computeIfAbsent(int instance) {
         if (instances_data.containsKey(instance)) {
             return instances_data.get(instance);
         }
-        InstanceData instance_data = new InstanceData(ID, N);
-        instances_data.put(instance, instance_data);
-        return instance_data;
-    }
+        InstanceData synod_data = new InstanceData(ID, N);
+        instances_data.put(instance, synod_data);
+        return synod_data;
+    }*/
 
     private void propose() {
-        int v = (int) (Math.random() * 2);
-        int instance_number = ++proposed_instance; //start at 1
-        logger.info("{}: Proposing {} for instance {}", ID, v, instance_number);
-        InstanceData instance_data = computeIfAbsent(instance_number);
-        instance_data.proposal = v;
-        instance_data.ballot = instance_data.ballot + N;
-        instance_data.resetStates();
+        logger.info("{}: Proposing {}", ID, proposal);
+        synod_data.proposal = proposal;
+        synod_data.ballot = synod_data.ballot + N;
+        synod_data.resetStates();
         actors.forEach(actor -> {
-            actor.tell(
-                new ReadMessage(instance_data.ballot, instance_number),
-                getSelf()
-            );
+            actor.tell(new ReadMessage(synod_data.ballot), getSelf());
         });
     }
 
@@ -112,9 +106,9 @@ public class Process extends AbstractActor {
         return crashed;
     }
 
-    private void report(int instance_number) {
+    private void report(int value) {
         report_actor.tell(
-            new DecidedMessage(System.currentTimeMillis(), instance_number),
+            new DecidedMessage(System.currentTimeMillis(), ID, value),
             getSelf()
         );
     }
@@ -140,12 +134,7 @@ public class Process extends AbstractActor {
             return;
         }
         decided = true;
-        logger.info(
-            "{}: Someone decided {} at instance {}",
-            ID,
-            decideMessage.proposal(),
-            decideMessage.instance()
-        );
+        logger.info("{}: Someone decided {} ", ID, decideMessage.proposal());
         //No need to send to all actors, since everyone has reference to everyone
         /*
         actors.forEach(actor -> {
@@ -159,31 +148,20 @@ public class Process extends AbstractActor {
     }
 
     private void onAckMessage(AckMessage ackMessage) {
-        if (tryReturnCrash() || decided) {
+        if (
+            tryReturnCrash() ||
+            decided ||
+            ackMessage.ballot() != synod_data.ballot
+        ) {
             return;
         }
-        InstanceData instance_data = computeIfAbsent(ackMessage.instance());
-        if (ackMessage.ballot() != instance_data.ballot) {
-            return; //this should not be possible
-        }
-        instance_data.ack_count++;
-        if (instance_data.ack_count >= N / 2) {
+        synod_data.ack_count++;
+        if (synod_data.ack_count >= N / 2) {
             decided = true;
-            logger.info(
-                "{}: Decided {} at instance {}",
-                ID,
-                instance_data.proposal,
-                ackMessage.instance()
-            );
-            report(ackMessage.instance());
+            logger.info("{}: Decided {}", ID, synod_data.proposal);
+            report(synod_data.proposal);
             actors.forEach(actor -> {
-                actor.tell(
-                    new DecideMessage(
-                        instance_data.proposal,
-                        ackMessage.instance()
-                    ),
-                    getSelf()
-                );
+                actor.tell(new DecideMessage(synod_data.proposal), getSelf());
             });
         }
     }
@@ -192,60 +170,37 @@ public class Process extends AbstractActor {
         if (tryReturnCrash()) {
             return;
         }
-        InstanceData instance_data = computeIfAbsent(imposeMessage.instance());
         if (
-            instance_data.read_ballot > imposeMessage.ballot() ||
-            instance_data.impose_ballot > imposeMessage.ballot()
+            synod_data.read_ballot > imposeMessage.ballot() ||
+            synod_data.impose_ballot > imposeMessage.ballot()
         ) {
             getSender()
-                .tell(
-                    new AbortMessage(
-                        imposeMessage.ballot(),
-                        imposeMessage.instance()
-                    ),
-                    getSelf()
-                );
+                .tell(new AbortMessage(imposeMessage.ballot()), getSelf());
         } else {
-            instance_data.estimate = imposeMessage.proposal();
-            instance_data.impose_ballot = imposeMessage.ballot();
-            getSender()
-                .tell(
-                    new AckMessage(
-                        imposeMessage.ballot(),
-                        imposeMessage.instance()
-                    ),
-                    getSelf()
-                );
+            synod_data.estimate = imposeMessage.proposal();
+            synod_data.impose_ballot = imposeMessage.ballot();
+            getSender().tell(new AckMessage(imposeMessage.ballot()), getSelf());
         }
     }
 
     private void onGatherMessage(GatherMessage gatherMessage) {
-        if (tryReturnCrash()) {
-            //logger.info("{}: Gather message not for me", ID);
+        if (tryReturnCrash() || gatherMessage.ballot() != synod_data.ballot) {
             return;
         }
-        InstanceData instance_data = computeIfAbsent(gatherMessage.instance());
-        if (gatherMessage.ballot() != instance_data.ballot) {
-            return; //this should not be possible
-        }
-        instance_data.states.set(
+        synod_data.states.set(
             gatherMessage.ID(),
             new State(gatherMessage.est_ballot(), gatherMessage.estimate())
         );
-        if (instance_data.statesCount() >= N / 2) {
+        if (synod_data.statesCount() >= N / 2) {
             //logger.info("{}: Majority gathered", ID);
-            State highest = instance_data.highestState();
+            State highest = synod_data.highestState();
             if (highest != null && highest.estballot() > 0) {
-                instance_data.proposal = highest.est();
+                synod_data.proposal = highest.est();
             }
-            instance_data.resetStates();
+            synod_data.resetStates();
             actors.forEach(actor -> {
                 actor.tell(
-                    new ImposeMessage(
-                        instance_data.ballot,
-                        instance_data.proposal,
-                        gatherMessage.instance()
-                    ),
+                    new ImposeMessage(synod_data.ballot, synod_data.proposal),
                     getSelf()
                 );
             });
@@ -253,12 +208,8 @@ public class Process extends AbstractActor {
     }
 
     private void onAbortMessage(AbortMessage abortMessage) {
-        if (decided || hold || abortMessage.instance() != proposed_instance) {
+        if (decided || hold || abortMessage.ballot() != synod_data.ballot) {
             return;
-        }
-        InstanceData instance_data = computeIfAbsent(abortMessage.instance());
-        if (abortMessage.ballot() != instance_data.ballot) {
-            return; //this should not be possible
         }
         propose();
         //Propose another value after some time
@@ -269,37 +220,20 @@ public class Process extends AbstractActor {
         if (tryReturnCrash()) {
             return;
         }
-        InstanceData instance_data = computeIfAbsent(readMessage.instance());
-        //logger.info("{}: Read", ID);
         if (
-            instance_data.read_ballot > readMessage.ballot() ||
-            instance_data.impose_ballot > readMessage.ballot()
+            synod_data.read_ballot > readMessage.ballot() ||
+            synod_data.impose_ballot > readMessage.ballot()
         ) {
-            /*logger.info(
-                "abort {} {} {} {}",
-                readMessage.ballot(),
-                readMessage.instance(),
-                instance_data.read_ballot,
-                instance_data.impose_ballot
-                );*/
-            getSender()
-                .tell(
-                    new AbortMessage(
-                        readMessage.ballot(),
-                        readMessage.instance()
-                    ),
-                    getSelf()
-                );
+            getSender().tell(new AbortMessage(readMessage.ballot()), getSelf());
         } else {
-            instance_data.read_ballot = readMessage.ballot();
+            synod_data.read_ballot = readMessage.ballot();
             getSender()
                 .tell(
                     new GatherMessage(
                         ID,
                         readMessage.ballot(),
-                        instance_data.impose_ballot,
-                        instance_data.estimate,
-                        readMessage.instance()
+                        synod_data.impose_ballot,
+                        synod_data.estimate
                     ),
                     getSelf()
                 );
