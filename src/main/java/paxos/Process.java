@@ -23,28 +23,33 @@ import paxos.SynodData.State;
 
 public class Process extends AbstractActor {
 
-    private record ReadMessage(int ballot) {}
+    private record ReadMessage(int ballot) {
+    }
 
-    private record AbortMessage(int ballot) {}
+    private record AbortMessage(int ballot) {
+    }
 
     private record GatherMessage(
-        int ID,
-        int ballot,
-        int est_ballot,
-        int estimate
-    ) {}
+            int ID,
+            int ballot,
+            int est_ballot,
+            int estimate) {
+    }
 
-    private record ImposeMessage(int ballot, int proposal) {}
+    private record ImposeMessage(int ballot, int proposal) {
+    }
 
-    private record AckMessage(int ballot) {}
+    private record AckMessage(int ballot) {
+    }
 
-    private record DecideMessage(int proposal) {}
+    private record DecideMessage(int proposal) {
+    }
 
     /*
-    private static final int TIMEOUT = 1000;
-    private final ScheduledExecutorService scheduler =
-        Executors.newScheduledThreadPool(1);
-    */
+     * private static final int TIMEOUT = 1000;
+     * private final ScheduledExecutorService scheduler =
+     * Executors.newScheduledThreadPool(1);
+     */
 
     private int ID;
     private int N;
@@ -62,9 +67,8 @@ public class Process extends AbstractActor {
     }
 
     private final LoggingAdapter logger = Logging.getLogger(
-        getContext().getSystem(),
-        this
-    );
+            getContext().getSystem(),
+            this);
 
     public Process(int ID, int N) {
         this.ID = ID;
@@ -73,14 +77,15 @@ public class Process extends AbstractActor {
     }
 
     /*
-    private InstanceData computeIfAbsent(int instance) {
-        if (instances_data.containsKey(instance)) {
-            return instances_data.get(instance);
-        }
-        InstanceData synod_data = new InstanceData(ID, N);
-        instances_data.put(instance, synod_data);
-        return synod_data;
-    }*/
+     * private InstanceData computeIfAbsent(int instance) {
+     * if (instances_data.containsKey(instance)) {
+     * return instances_data.get(instance);
+     * }
+     * InstanceData synod_data = new InstanceData(ID, N);
+     * instances_data.put(instance, synod_data);
+     * return synod_data;
+     * }
+     */
 
     private void propose() {
         logger.info("{}: Proposing {}", ID, proposal);
@@ -100,7 +105,7 @@ public class Process extends AbstractActor {
             return false;
         }
         if (Math.random() < alpha) {
-            //logger.info("{}: crashed", ID);
+            // logger.info("{}: crashed", ID);
             crashed = true;
         }
         return crashed;
@@ -108,25 +113,24 @@ public class Process extends AbstractActor {
 
     private void report(int value) {
         report_actor.tell(
-            new DecidedMessage(System.currentTimeMillis(), ID, value),
-            getSelf()
-        );
+                new DecidedMessage(System.currentTimeMillis(), ID, value),
+                getSelf());
     }
 
     @Override
     public Receive createReceive() {
         return receiveBuilder()
-            .match(DecideMessage.class, this::onDecideMessage)
-            .match(AckMessage.class, this::onAckMessage)
-            .match(ImposeMessage.class, this::onImposeMessage)
-            .match(GatherMessage.class, this::onGatherMessage)
-            .match(AbortMessage.class, this::onAbortMessage)
-            .match(ReadMessage.class, this::onReadMessage)
-            .match(LaunchMessage.class, this::onLaunchMessage)
-            .match(HoldMessage.class, this::onHoldMessage)
-            .match(CrashMessage.class, this::onCrashMessage)
-            .match(ActorListMessage.class, this::onActorListMessage)
-            .build();
+                .match(DecideMessage.class, this::onDecideMessage)
+                .match(AckMessage.class, this::onAckMessage)
+                .match(ImposeMessage.class, this::onImposeMessage)
+                .match(GatherMessage.class, this::onGatherMessage)
+                .match(AbortMessage.class, this::onAbortMessage)
+                .match(ReadMessage.class, this::onReadMessage)
+                .match(LaunchMessage.class, this::onLaunchMessage)
+                .match(HoldMessage.class, this::onHoldMessage)
+                .match(CrashMessage.class, this::onCrashMessage)
+                .match(ActorListMessage.class, this::onActorListMessage)
+                .build();
     }
 
     private void onDecideMessage(DecideMessage decideMessage) {
@@ -135,24 +139,22 @@ public class Process extends AbstractActor {
         }
         decided = true;
         logger.info("{}: Someone decided {} ", ID, decideMessage.proposal());
-        //No need to send to all actors, since everyone has reference to everyone
+        // No need to send to all actors, since everyone has reference to everyone
         /*
-        actors.forEach(actor -> {
-            actor.tell(
-                new DecideMessage(decideMessage.proposal()),
-                getSender()
-            );
-            });
-        */
+         * actors.forEach(actor -> {
+         * actor.tell(
+         * new DecideMessage(decideMessage.proposal()),
+         * getSender()
+         * );
+         * });
+         */
 
     }
 
     private void onAckMessage(AckMessage ackMessage) {
-        if (
-            tryReturnCrash() ||
-            decided ||
-            ackMessage.ballot() != synod_data.ballot
-        ) {
+        if (tryReturnCrash() ||
+                decided ||
+                ackMessage.ballot() != synod_data.ballot) {
             return;
         }
         synod_data.ack_count++;
@@ -170,12 +172,10 @@ public class Process extends AbstractActor {
         if (tryReturnCrash()) {
             return;
         }
-        if (
-            synod_data.read_ballot > imposeMessage.ballot() ||
-            synod_data.impose_ballot > imposeMessage.ballot()
-        ) {
+        if (synod_data.read_ballot > imposeMessage.ballot() ||
+                synod_data.impose_ballot > imposeMessage.ballot()) {
             getSender()
-                .tell(new AbortMessage(imposeMessage.ballot()), getSelf());
+                    .tell(new AbortMessage(imposeMessage.ballot()), getSelf());
         } else {
             synod_data.estimate = imposeMessage.proposal();
             synod_data.impose_ballot = imposeMessage.ballot();
@@ -188,11 +188,10 @@ public class Process extends AbstractActor {
             return;
         }
         synod_data.states.set(
-            gatherMessage.ID(),
-            new State(gatherMessage.est_ballot(), gatherMessage.estimate())
-        );
+                gatherMessage.ID(),
+                new State(gatherMessage.est_ballot(), gatherMessage.estimate()));
         if (synod_data.statesCount() >= N / 2) {
-            //logger.info("{}: Majority gathered", ID);
+            // logger.info("{}: Majority gathered", ID);
             State highest = synod_data.highestState();
             if (highest != null && highest.estballot() > 0) {
                 synod_data.proposal = highest.est();
@@ -200,9 +199,8 @@ public class Process extends AbstractActor {
             synod_data.resetStates();
             actors.forEach(actor -> {
                 actor.tell(
-                    new ImposeMessage(synod_data.ballot, synod_data.proposal),
-                    getSelf()
-                );
+                        new ImposeMessage(synod_data.ballot, synod_data.proposal),
+                        getSelf());
             });
         }
     }
@@ -212,31 +210,27 @@ public class Process extends AbstractActor {
             return;
         }
         propose();
-        //Propose another value after some time
-        //scheduler.schedule(() -> propose(), TIMEOUT, TimeUnit.MILLISECONDS);
+        // Propose another value after some time
+        // scheduler.schedule(() -> propose(), TIMEOUT, TimeUnit.MILLISECONDS);
     }
 
     private void onReadMessage(ReadMessage readMessage) {
         if (tryReturnCrash()) {
             return;
         }
-        if (
-            synod_data.read_ballot > readMessage.ballot() ||
-            synod_data.impose_ballot > readMessage.ballot()
-        ) {
+        if (synod_data.read_ballot > readMessage.ballot() ||
+                synod_data.impose_ballot > readMessage.ballot()) {
             getSender().tell(new AbortMessage(readMessage.ballot()), getSelf());
         } else {
             synod_data.read_ballot = readMessage.ballot();
             getSender()
-                .tell(
-                    new GatherMessage(
-                        ID,
-                        readMessage.ballot(),
-                        synod_data.impose_ballot,
-                        synod_data.estimate
-                    ),
-                    getSelf()
-                );
+                    .tell(
+                            new GatherMessage(
+                                    ID,
+                                    readMessage.ballot(),
+                                    synod_data.impose_ballot,
+                                    synod_data.estimate),
+                            getSelf());
         }
     }
 
@@ -249,7 +243,7 @@ public class Process extends AbstractActor {
 
     private void onHoldMessage(HoldMessage holdMessage) {
         hold = true;
-        //logger.info("{}: Hold", ID);
+        // logger.info("{}: Hold", ID);
     }
 
     private void onCrashMessage(CrashMessage crashMessage) {
